@@ -8,6 +8,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -69,6 +70,32 @@ func (q *Queries) DeleteAllUsers(ctx context.Context) error {
 	return err
 }
 
+const generateRefreshToken = `-- name: GenerateRefreshToken :one
+INSERT INTO refresh_tokens (token,created_at,updated_at,user_id,expires_at,revoked_at)
+VALUES($1,NOW(), NOW(), $2, $3, NULL)
+RETURNING token, created_at, updated_at, user_id, expires_at, revoked_at
+`
+
+type GenerateRefreshTokenParams struct {
+	Token     string
+	UserID    uuid.UUID
+	ExpiresAt time.Time
+}
+
+func (q *Queries) GenerateRefreshToken(ctx context.Context, arg GenerateRefreshTokenParams) (RefreshToken, error) {
+	row := q.db.QueryRowContext(ctx, generateRefreshToken, arg.Token, arg.UserID, arg.ExpiresAt)
+	var i RefreshToken
+	err := row.Scan(
+		&i.Token,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UserID,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
 const getAllChirps = `-- name: GetAllChirps :many
 SELECT id, created_at, updated_at, body, user_id from chirps
 order by created_at
@@ -120,6 +147,24 @@ func (q *Queries) GetChirpById(ctx context.Context, id uuid.UUID) (Chirp, error)
 	return i, err
 }
 
+const getRefreshToken = `-- name: GetRefreshToken :one
+select token, created_at, updated_at, user_id, expires_at, revoked_at from refresh_tokens where token=$1
+`
+
+func (q *Queries) GetRefreshToken(ctx context.Context, token string) (RefreshToken, error) {
+	row := q.db.QueryRowContext(ctx, getRefreshToken, token)
+	var i RefreshToken
+	err := row.Scan(
+		&i.Token,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UserID,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
 SELECT id, created_at, updated_at, email, hashed_password from users where email=$1
 `
@@ -135,4 +180,15 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email sql.NullString) (Use
 		&i.HashedPassword,
 	)
 	return i, err
+}
+
+const getUserFromRefreshToken = `-- name: GetUserFromRefreshToken :one
+SELECT user_id from refresh_tokens where token=$1
+`
+
+func (q *Queries) GetUserFromRefreshToken(ctx context.Context, token string) (uuid.UUID, error) {
+	row := q.db.QueryRowContext(ctx, getUserFromRefreshToken, token)
+	var user_id uuid.UUID
+	err := row.Scan(&user_id)
+	return user_id, err
 }

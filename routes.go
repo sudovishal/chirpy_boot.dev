@@ -5,12 +5,13 @@ import (
 )
 
 func (apiCfg *apiConfig) registerRoutes(mux *http.ServeMux) {
-
+	mux.HandleFunc("GET /api/healthz", handlerReadiness)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset) // delete All Users
 
 	mux.HandleFunc("POST /api/users", apiCfg.createUser)
-	mux.HandleFunc("POST /api/login", apiCfg.login)
+	mux.HandleFunc("POST /api/login", apiCfg.handlerLogin)
+	mux.HandleFunc("POST /api/refresh", apiCfg.handlerCreateRFToken)
 
 	mux.HandleFunc("POST /api/validate_chirp", validateChirp)
 	mux.HandleFunc("POST /api/chirps", apiCfg.createChirp)

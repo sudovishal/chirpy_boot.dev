@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sudovishal/chirpy/internal/auth"
 	"github.com/sudovishal/chirpy/internal/database"
 )
 
@@ -98,13 +99,29 @@ func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		log.Printf("Error getting token: %s", err)
+		w.WriteHeader(400)
+		return
+	}
+
+	userId, err := auth.ValidateJWT(token, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, 401, "Error validating token:", err)
+		// log.Printf("Error validating token: %s", err)
+		// w.WriteHeader(401)
+		return
+	}
+
 	chirp, err := cfg.db.CreateChirp(r.Context(), database.CreateChirpParams{
 		Body:   params.Body,
-		UserID: params.UserId,
+		UserID: userId,
 	})
 	if err != nil {
-		log.Printf("Error creating chirp: %s", err)
-		w.WriteHeader(500)
+		respondWithError(w, 500, "Error creating chirp:", err)
+		// log.Printf("Error creating chirp: %s", err)
+		// w.WriteHeader(500)
 		return
 	}
 

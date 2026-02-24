@@ -21,3 +21,7 @@ example:
 
 
 export PATH="/usr/local/opt/postgresql@15/bin:$PATH"
+
+
+
+pgcli -h localhost -p 5432 -U vishals -d chirpy

@@ -17,6 +17,7 @@ import (
 type apiConfig struct {
 	db             *database.Queries
 	fileserverHits atomic.Int32
+	jwtSecret      string
 }
 
 type cleanResponse struct {
@@ -36,10 +37,11 @@ func main() {
 	}
 
 	dbQueries := database.New(db)
-
+	secretStr := os.Getenv("jwtsecret")
 	apiCfg := apiConfig{
 		db:             dbQueries,
 		fileserverHits: atomic.Int32{},
+		jwtSecret:      secretStr,
 	}
 	mux := http.NewServeMux()
 
@@ -49,11 +51,11 @@ func main() {
 
 	mux.Handle("GET /app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(".")))))
 
-	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		// w.WriteHeader(http.StatusMethodNotAllowed)
-		w.Write([]byte("OK"))
-	})
+	// mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
+	// 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	// 	// w.WriteHeader(http.StatusMethodNotAllowed)
+	// 	w.Write([]byte("OK"))
+	// })
 
 	fmt.Println("Server listening on localhost:8080")
 	log.Fatal(server.ListenAndServe())
