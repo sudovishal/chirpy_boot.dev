@@ -62,3 +62,24 @@ A []byte (byte slice) is the standard way to represent raw binary data.
 The golang-jwt library requires a []byte because it's going to perform bitwise operations on that key to sign or verify the token. It doesn't care about the "letters" in your secret; it only cares about the raw binary values.
 
 It's similar to how a scale doesn't care if you're weighing "gold," "feathers," or "lead"—it only cares about the raw mass. Converting to []byte is like stripping away the label so the algorithm can "weigh" the raw data.
+
+######################################################
+
+Handling nullstring when sqlc generates a parameter when a column can be NULL.
+var email sql.NullString
+
+if params.Email == "" {
+    email = sql.NullString{
+        Valid: false, // will write NULL
+    }
+} else {
+    email = sql.NullString{
+        String: params.Email,
+        Valid:  true,
+    }
+}
+
+err := cfg.db.UpdateEmail(r.Context(), database.UpdateEmailParams{
+    Email: email,
+    ID:    userId,
+})

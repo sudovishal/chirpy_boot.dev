@@ -1,8 +1,9 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -18,6 +19,7 @@ type User struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 	Email          string    `json:"email"`
 	HashedPassword string    `json:"-"`
+	IsChirpyRed    bool      `json:"is_chirpy_red"`
 }
 
 func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +52,7 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 
 	user, err := cfg.db.CreateUser(
 		r.Context(), database.CreateUserParams{
-			Email:          sql.NullString{String: params.Email, Valid: true},
+			Email:          params.Email,
 			HashedPassword: hashedPwd,
 		})
 	if err != nil {
@@ -69,13 +71,13 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 
 	// w.WriteHeader(201)
 	// json.NewEncoder(w).Encode(apiUser)
-
 	respondWithJSON(w, http.StatusCreated, response{
 		User: User{
-			ID:        user.ID,
-			CreatedAt: user.CreatedAt.Time,
-			UpdatedAt: user.UpdatedAt.Time,
-			Email:     user.Email.String,
+			ID:          user.ID,
+			CreatedAt:   user.CreatedAt.Time,
+			UpdatedAt:   user.UpdatedAt.Time,
+			Email:       user.Email,
+			IsChirpyRed: user.IsChirpyRed,
 		},
 	})
 
@@ -142,12 +144,8 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 
 	expiresAt := time.Now().Add(1 * time.Hour)
 
-	user, err := cfg.db.GetUserByEmail(
-		r.Context(),
-		sql.NullString{
-			String: params.Email,
-			Valid:  true,
-		})
+	user, err := cfg.db.GetUserByEmail(r.Context(), params.Email)
+
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, "Incorrect email or password", err)
 		return
@@ -208,13 +206,13 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusInternalServerError, "Failed to store Refresh Token", err)
 		return
 	}
-
 	respondWithJSON(w, http.StatusOK, response{
 		User: User{
-			ID:        user.ID,
-			Email:     user.Email.String,
-			CreatedAt: user.CreatedAt.Time,
-			UpdatedAt: user.UpdatedAt.Time,
+			ID:          user.ID,
+			Email:       user.Email,
+			CreatedAt:   user.CreatedAt.Time,
+			UpdatedAt:   user.UpdatedAt.Time,
+			IsChirpyRed: user.IsChirpyRed,
 		},
 		Token:        token,
 		RefreshToken: refreshToken.Token,
@@ -224,4 +222,105 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 
 func (cfg *apiConfig) handlerCreateRFToken(w http.ResponseWriter, r *http.Request) {
 
+	tokenHeader, err := auth.GetBearerToken(r.Header)
+	fmt.Println(tokenHeader)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Unable to fetch Bearer Token", err)
+		return
+	}
+
+	User, err := cfg.db.GetUserFromRefreshToken(r.Context(), tokenHeader)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Unable to fetch user", err)
+		return
+	}
+
+	// expiresAt := time.Now().Add(1 * time.Hour)
+	refreshAccessToken, err := auth.MakeJWT(User.ID, cfg.jwtSecret, time.Hour)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to generate JWT", err)
+		return
+	}
+
+	type response struct {
+		Token string `json:"token"`
+	}
+
+	respondWithJSON(w, http.StatusOK, response{
+		Token: refreshAccessToken,
+	})
+
+}
+
+func (cfg *apiConfig) handlerRevokeToken(w http.ResponseWriter, r *http.Request) {
+	tokenHeader, err := auth.GetBearerToken(r.Header)
+	fmt.Println(tokenHeader)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Unable to fetch Bearer Token", err)
+		return
+	}
+
+	err = cfg.db.DeleteRFToken(r.Context(), tokenHeader)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Unable to revoke", err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (cfg *apiConfig) handlerUpdateCreds(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "Unable to fetch Bearer Token", err)
+		return
+	}
+
+	type request struct {
+		Email           string `json:"email"`
+		UpdatedPassword string `json:"updated_password"`
+	}
+
+	type response struct {
+		User
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := request{}
+	err = decoder.Decode(&params)
+	if err != nil {
+		log.Printf("Error decoding parameters: %s", err)
+		w.WriteHeader(400)
+		return
+	}
+
+	userId, err := auth.ValidateJWT(token, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, 401, "Error validating token:", err)
+		return
+	}
+
+	hashedPwd, err := auth.HashPassword(params.UpdatedPassword)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't hash password", err)
+		return
+	}
+
+	user, err := cfg.db.UpdateEmailPass(r.Context(), database.UpdateEmailPassParams{
+		Email:          params.Email,
+		ID:             userId,
+		HashedPassword: hashedPwd,
+	})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Unable to update the Email and Password", err)
+	}
+
+	respondWithJSON(w, http.StatusOK, response{
+		User: User{
+			ID:        userId,
+			Email:     params.Email,
+			CreatedAt: user.CreatedAt.Time,
+			UpdatedAt: user.UpdatedAt.Time,
+		},
+	})
 }
